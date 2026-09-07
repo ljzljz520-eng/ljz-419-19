@@ -1,0 +1,425 @@
+# 企业级微服务应用系统 - Docker Compose 配置
+# 支持高可用、服务发现、配置管理与监控
+
+x-user-service-env: &user-service-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-user_db}
+  USER_DB_SCHEMA: ${USER_DB_SCHEMA:-user_service}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+  JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+  SERVICE_NAME: user-service
+  SERVICE_HOST: "0.0.0.0"
+  SERVICE_PORT: "8000"
+  DEBUG: "${APP_DEBUG:-false}"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  CONSUL_ENABLED: "${CONSUL_ENABLED:-true}"
+  CONSUL_HOST: consul
+  CONSUL_PORT: "8500"
+  CONSUL_SCHEME: http
+  CONSUL_CONFIG_PREFIX: ${CONSUL_CONFIG_PREFIX:-config/user-service}
+  GRPC_PORT: "50051"
+  GRPC_TLS_ENABLED: "${GRPC_TLS_ENABLED:-true}"
+  GRPC_MTLS_ENABLED: "${GRPC_MTLS_ENABLED:-false}"
+  GRPC_SERVER_CERT_PATH: /app/certs/server.crt
+  GRPC_SERVER_KEY_PATH: /app/certs/server.key
+  GRPC_CA_CERT_PATH: /app/certs/ca.crt
+  TZ: ${TZ:-Asia/Shanghai}
+
+x-kong-env: &kong-env
+  KONG_DATABASE: "off"
+  KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+  KONG_PROXY_ACCESS_LOG: /dev/stdout
+  KONG_ADMIN_ACCESS_LOG: /dev/stdout
+  KONG_PROXY_ERROR_LOG: /dev/stderr
+  KONG_ADMIN_ERROR_LOG: /dev/stderr
+  KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+  KONG_PROXY_LISTEN: "0.0.0.0:8000"
+  KONG_STATUS_LISTEN: "0.0.0.0:8100"
+  KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-info}
+  KONG_PLUGINS: bundled
+
+x-pgpool-env: &pgpool-env
+  PGPOOL_PARAMS_PORT: "5432"
+  PGPOOL_PARAMS_BACKEND_HOSTNAME0: postgres-primary
+  PGPOOL_PARAMS_BACKEND_PORT0: "5432"
+  PGPOOL_PARAMS_BACKEND_WEIGHT0: "1"
+  PGPOOL_PARAMS_BACKEND_FLAG0: "ALLOW_TO_FAILOVER"
+  PGPOOL_PARAMS_BACKEND_HOSTNAME1: postgres-replica
+  PGPOOL_PARAMS_BACKEND_PORT1: "5432"
+  PGPOOL_PARAMS_BACKEND_WEIGHT1: "1"
+  PGPOOL_PARAMS_BACKEND_FLAG1: "ALLOW_TO_FAILOVER"
+  PGPOOL_PARAMS_SR_CHECK_PERIOD: "10"
+  PGPOOL_PARAMS_SR_CHECK_USER: ${POSTGRES_USER:-postgres}
+  PGPOOL_PARAMS_SR_CHECK_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  PGPOOL_PARAMS_HEALTH_CHECK_PERIOD: "10"
+  PGPOOL_PARAMS_HEALTH_CHECK_USER: ${POSTGRES_USER:-postgres}
+  PGPOOL_PARAMS_HEALTH_CHECK_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  PGPOOL_PARAMS_FAILOVER_ON_BACKEND_ERROR: "on"
+  PGPOOL_PARAMS_FAILOVER_COMMAND: "/opt/pgpool-II/scripts/promote-replica.sh"
+  PGPOOL_PARAMS_LOAD_BALANCE_MODE: "on"
+  POSTGRES_USERNAME: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  PGPOOL_PCP_USER: ${PGPOOL_ADMIN_USERNAME:-pgpooladmin}
+  PGPOOL_PCP_PASSWORD: ${PGPOOL_ADMIN_PASSWORD:?PGPOOL_ADMIN_PASSWORD is required}
+  TZ: ${TZ:-Asia/Shanghai}
+
+services:
+  # ==================== 服务发现与配置管理（Consul） ====================
+  consul:
+    image: hashicorp/consul:1.17
+    restart: unless-stopped
+    environment:
+      CONSUL_DATA_DIR: /consul/data
+    command: >
+      consul agent -server -bootstrap-expect=1 -ui
+      -client=0.0.0.0 -node=consul-server -datacenter=dc1
+      -config-dir=/consul/config -data-dir=/consul/data
+    ports:
+      - "8500:8500"
+    volumes:
+      - ./scripts/consul/config:/consul/config
+      - consul_data:/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "info"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    networks:
+      - enterprise-network
+
+  consul-bootstrap:
+    image: curlimages/curl:8.7.1
+    restart: unless-stopped
+    command: ["sh", "-c", "/bootstrap.sh && touch /tmp/bootstrap.done && tail -f /dev/null"]
+    volumes:
+      - ./scripts/consul/bootstrap.sh:/bootstrap.sh:ro
+    depends_on:
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/bootstrap.done"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - enterprise-network
+
+  # ==================== 数据库高可用（Primary + Replica + Pgpool 双实例） ====================
+  postgres-primary:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-user_db}
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:?POSTGRES_REPLICATION_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
+      PGTZ: ${TZ:-Asia/Shanghai}
+    command: >
+      postgres
+      -c wal_level=replica
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby=on
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+      - ./scripts/postgres/init-primary-replication.sh:/docker-entrypoint-initdb.d/02-init-replication.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-user_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+    networks:
+      - enterprise-network
+
+  postgres-replica:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-user_db}
+      POSTGRES_PRIMARY_HOST: postgres-primary
+      POSTGRES_PRIMARY_PORT: "5432"
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:?POSTGRES_REPLICATION_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
+      PGTZ: ${TZ:-Asia/Shanghai}
+    command: ["sh", "/usr/local/bin/start-replica.sh"]
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./scripts/postgres/start-replica.sh:/usr/local/bin/start-replica.sh:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-user_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+    networks:
+      - enterprise-network
+
+  postgres-pool-1:
+    image: pgpool/pgpool:4.4.2
+    restart: unless-stopped
+    environment: *pgpool-env
+    command: ["sh", "/usr/local/bin/start-pgpool.sh"]
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts/postgres/promote-replica.sh:/opt/pgpool-II/scripts/promote-replica.sh:ro
+      - ./scripts/postgres/start-pgpool.sh:/usr/local/bin/start-pgpool.sh:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      postgres-replica:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+    networks:
+      enterprise-network:
+        aliases:
+          - postgres
+
+  postgres-pool-2:
+    image: pgpool/pgpool:4.4.2
+    restart: unless-stopped
+    environment: *pgpool-env
+    command: ["sh", "/usr/local/bin/start-pgpool.sh"]
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./scripts/postgres/promote-replica.sh:/opt/pgpool-II/scripts/promote-replica.sh:ro
+      - ./scripts/postgres/start-pgpool.sh:/usr/local/bin/start-pgpool.sh:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      postgres-replica:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+    networks:
+      enterprise-network:
+        aliases:
+          - postgres
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-user_db}?sslmode=disable
+    depends_on:
+      postgres-pool-1:
+        condition: service_healthy
+    networks:
+      - enterprise-network
+
+  # ==================== 用户服务（双副本） ====================
+  user-service:
+    image: ${USER_SERVICE_IMAGE:-oa-user-service:local}
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment: *user-service-env
+    ports:
+      - "8010:8000"
+      - "50051:50051"
+    volumes:
+      - ./services/user-service/certs:/app/certs:ro
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-bootstrap:
+        condition: service_healthy
+      postgres-pool-1:
+        condition: service_healthy
+      postgres-pool-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - enterprise-network
+
+  user-service-replica:
+    image: ${USER_SERVICE_IMAGE:-oa-user-service:local}
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment: *user-service-env
+    ports:
+      - "8011:8000"
+      - "50052:50051"
+    volumes:
+      - ./services/user-service/certs:/app/certs:ro
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-bootstrap:
+        condition: service_healthy
+      postgres-pool-1:
+        condition: service_healthy
+      postgres-pool-2:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - enterprise-network
+
+  # ==================== Kong 网关（双入口、无 Nginx 前置） ====================
+  kong-1:
+    image: kong:3.5
+    restart: unless-stopped
+    environment: *kong-env
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - ./kong:/kong/declarative:ro
+    depends_on:
+      user-service:
+        condition: service_healthy
+      user-service-replica:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - enterprise-network
+
+  kong-2:
+    image: kong:3.5
+    restart: unless-stopped
+    environment: *kong-env
+    ports:
+      - "8002:8000"
+      - "8003:8001"
+    volumes:
+      - ./kong:/kong/declarative:ro
+    depends_on:
+      user-service:
+        condition: service_healthy
+      user-service-replica:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - enterprise-network
+
+  # ==================== 监控 ====================
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./scripts/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      user-service:
+        condition: service_healthy
+      user-service-replica:
+        condition: service_healthy
+      kong-1:
+        condition: service_healthy
+      kong-2:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    networks:
+      - enterprise-network
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+    volumes:
+      - ./scripts/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - enterprise-network
+
+  # ==================== 前端服务 ====================
+  frontend:
+    image: ${FRONTEND_IMAGE:-oa-frontend:local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      kong-1:
+        condition: service_healthy
+      kong-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - enterprise-network
+
+# ==================== 网络配置 ====================
+networks:
+  enterprise-network:
+    driver: bridge
+    name: enterprise-network
+
+# ==================== 数据卷配置 ====================
+volumes:
+  postgres_primary_data:
+    name: enterprise-postgres-primary-data
+  postgres_replica_data:
+    name: enterprise-postgres-replica-data
+  prometheus_data:
+    name: enterprise-prometheus-data
+  grafana_data:
+    name: enterprise-grafana-data
+  consul_data:
+    name: enterprise-consul-data

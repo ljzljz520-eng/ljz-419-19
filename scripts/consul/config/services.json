@@ -1,0 +1,100 @@
+{
+  "services": [
+    {
+      "id": "user-service-http",
+      "name": "user-service",
+      "address": "user-service",
+      "port": 8000,
+      "tags": ["http", "api", "primary"],
+      "checks": [
+        {
+          "id": "user-service-http-health",
+          "name": "user-service /health",
+          "http": "http://user-service:8000/health",
+          "interval": "10s",
+          "timeout": "3s"
+        }
+      ]
+    },
+    {
+      "id": "user-service-replica-http",
+      "name": "user-service",
+      "address": "user-service-replica",
+      "port": 8000,
+      "tags": ["http", "api", "replica"],
+      "checks": [
+        {
+          "id": "user-service-replica-http-health",
+          "name": "user-service-replica /health",
+          "http": "http://user-service-replica:8000/health",
+          "interval": "10s",
+          "timeout": "3s"
+        }
+      ]
+    },
+    {
+      "id": "kong-1-proxy",
+      "name": "kong-proxy",
+      "address": "kong-1",
+      "port": 8000,
+      "tags": ["gateway", "proxy", "primary"],
+      "checks": [
+        {
+          "id": "kong-1-proxy-health",
+          "name": "kong-1 proxy /api/v1/health",
+          "http": "http://kong-1:8000/api/v1/health",
+          "interval": "10s",
+          "timeout": "5s"
+        }
+      ]
+    },
+    {
+      "id": "kong-2-proxy",
+      "name": "kong-proxy",
+      "address": "kong-2",
+      "port": 8000,
+      "tags": ["gateway", "proxy", "replica"],
+      "checks": [
+        {
+          "id": "kong-2-proxy-health",
+          "name": "kong-2 proxy /api/v1/health",
+          "http": "http://kong-2:8000/api/v1/health",
+          "interval": "10s",
+          "timeout": "5s"
+        }
+      ]
+    },
+    {
+      "id": "postgres-pool-1",
+      "name": "postgres",
+      "address": "postgres-pool-1",
+      "port": 5432,
+      "tags": ["database", "pgpool", "primary"],
+      "checks": [
+        {
+          "id": "postgres-pool-1-tcp",
+          "name": "postgres-pool-1 tcp",
+          "tcp": "postgres-pool-1:5432",
+          "interval": "10s",
+          "timeout": "3s"
+        }
+      ]
+    },
+    {
+      "id": "postgres-pool-2",
+      "name": "postgres",
+      "address": "postgres-pool-2",
+      "port": 5432,
+      "tags": ["database", "pgpool", "replica"],
+      "checks": [
+        {
+          "id": "postgres-pool-2-tcp",
+          "name": "postgres-pool-2 tcp",
+          "tcp": "postgres-pool-2:5432",
+          "interval": "10s",
+          "timeout": "3s"
+        }
+      ]
+    }
+  ]
+}

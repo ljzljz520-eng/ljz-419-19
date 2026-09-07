@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: consul
+    metrics_path: /v1/agent/metrics
+    params:
+      format: [prometheus]
+    static_configs:
+      - targets: ["consul:8500"]
+
+  - job_name: user-service
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - user-service:8000
+          - user-service-replica:8000
+
+  - job_name: kong-admin
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - kong-1:8001
+          - kong-2:8001
+
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: docker-health
+    metrics_path: /health
+    static_configs:
+      - targets:
+          - user-service:8000
+          - user-service-replica:8000

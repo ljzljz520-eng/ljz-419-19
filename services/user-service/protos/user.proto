@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "user/pb";
+
+// ==================== 用户服务 gRPC 接口定义 ====================
+
+service UserService {
+  // 认证相关
+  rpc Login (LoginRequest) returns (LoginResponse);
+  rpc Register (RegisterRequest) returns (RegisterResponse);
+  rpc VerifyToken (VerifyTokenRequest) returns (VerifyTokenResponse);
+  rpc RefreshToken (RefreshTokenRequest) returns (RefreshTokenResponse);
+
+  // 用户管理
+  rpc GetUser (GetUserRequest) returns (GetUserResponse);
+  rpc GetUserByUsername (GetUserByUsernameRequest) returns (GetUserResponse);
+  rpc ListUsers (ListUsersRequest) returns (ListUsersResponse);
+  rpc UpdateUser (UpdateUserRequest) returns (GetUserResponse);
+  rpc DeleteUser (DeleteUserRequest) returns (DeleteUserResponse);
+
+  // 健康检查
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ==================== 通用消息 ====================
+
+message UserInfo {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string nickname = 4;
+  string avatar = 5;
+  string phone = 6;
+  string bio = 7;
+  string role = 8;
+  bool is_active = 9;
+  bool is_verified = 10;
+  string created_at = 11;
+  string updated_at = 12;
+  string last_login_at = 13;
+}
+
+// ==================== 认证消息 ====================
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  bool success = 1;
+  string message = 2;
+  string access_token = 3;
+  string refresh_token = 4;
+  string token_type = 5;
+  int32 expires_in = 6;
+  UserInfo user = 7;
+}
+
+message RegisterRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+  string confirm_password = 4;
+  string nickname = 5;
+}
+
+message RegisterResponse {
+  bool success = 1;
+  string message = 2;
+  UserInfo user = 3;
+}
+
+message VerifyTokenRequest {
+  string token = 1;
+}
+
+message VerifyTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string role = 3;
+  string username = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  bool success = 1;
+  string message = 2;
+  string access_token = 3;
+  string refresh_token = 4;
+  string token_type = 5;
+  int32 expires_in = 6;
+}
+
+// ==================== 用户管理消息 ====================
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserByUsernameRequest {
+  string username = 1;
+}
+
+message GetUserResponse {
+  bool success = 1;
+  string message = 2;
+  UserInfo user = 3;
+}
+
+message ListUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string role = 3;
+  string is_active = 4;   // "true" / "false" / ""
+  string search = 5;
+}
+
+message ListUsersResponse {
+  bool success = 1;
+  string message = 2;
+  repeated UserInfo users = 3;
+  int32 total = 4;
+  int32 page = 5;
+  int32 page_size = 6;
+  int32 total_pages = 7;
+}
+
+message UpdateUserRequest {
+  string user_id = 1;
+  string nickname = 2;
+  string phone = 3;
+  string bio = 4;
+  string avatar = 5;
+  string role = 6;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ==================== 健康检查消息 ====================
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  string service = 2;
+  string version = 3;
+  string timestamp = 4;
+}

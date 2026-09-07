@@ -1,0 +1,123 @@
+# Kong 声明式配置文件
+# 用于定义服务、路由、插件等
+
+_format_version: "3.0"
+_transform: true
+
+upstreams:
+  - name: user-service-upstream
+    algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        healthy:
+          interval: 5
+          successes: 2
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 2
+          http_failures: 2
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          tcp_failures: 2
+          timeouts: 2
+          http_failures: 2
+    targets:
+      - target: user-service:8000
+        weight: 100
+      - target: user-service-replica:8000
+        weight: 100
+
+# 服务定义
+services:
+  # 用户服务
+  - name: user-service
+    host: user-service-upstream
+    port: 8000
+    protocol: http
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    retries: 5
+    # 用户服务路由
+    routes:
+      - name: user-service-api
+        paths:
+          - /api/v1/users
+          - /api/v1/auth
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - PATCH
+          - OPTIONS
+        strip_path: false
+        preserve_host: true
+      - name: user-service-health
+        paths:
+          - /api/v1/health
+        methods:
+          - GET
+        strip_path: false
+    # 服务级别插件
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "*"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - PATCH
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - X-Request-ID
+          exposed_headers:
+            - X-Request-ID
+          credentials: true
+          max_age: 3600
+
+# 全局插件
+plugins:
+  # 请求速率限制
+  - name: rate-limiting
+    config:
+      minute: 100
+      hour: 1000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # 请求日志
+  - name: file-log
+    config:
+      path: /dev/stdout
+      reopen: true
+
+  # Prometheus 监控指标
+  - name: prometheus
+    config:
+      per_consumer: false
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+# 消费者定义（可选，用于 API Key 认证等）
+consumers:
+  - username: frontend-app
+    keyauth_credentials:
+      - key: frontend-api-key-2024
+  - username: mobile-app
+    keyauth_credentials:
+      - key: mobile-api-key-2024
