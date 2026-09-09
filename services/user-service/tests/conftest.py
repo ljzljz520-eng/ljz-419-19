@@ -12,6 +12,18 @@ from datetime import datetime
 # 确保 app 包可以被导入
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# 测试环境默认值：必须在导入任何 app 模块之前设置，
+# 因为 app.config.settings 在首次导入时即固化配置。
+# 集成测试使用本地测试库与独立 schema，不影响开发库。
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres123@localhost:5432/user_db_test",
+)
+os.environ.setdefault("USER_DB_SCHEMA", "user_service_test")
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key")
+os.environ.setdefault("CONSUL_ENABLED", "false")
+os.environ.setdefault("LOG_LEVEL", "WARNING")
+
 
 # ==================== Mock 数据库 Fixtures ====================
 

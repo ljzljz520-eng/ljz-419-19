@@ -13,6 +13,7 @@ from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -158,7 +159,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=422,
         message="请求参数校验失败",
         error_code="VALIDATION_ERROR",
-        details={"errors": exc.errors()},
+        details={"errors": jsonable_encoder(exc.errors())},
     )
 
 
