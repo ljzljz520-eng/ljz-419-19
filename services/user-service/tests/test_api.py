@@ -84,22 +84,24 @@ class TestAuthEndpoints:
         mock_user.username = "newuser"
         mock_user.email = "new@example.com"
 
-        with patch("app.routers.auth.get_db") as mock_get_db:
-            mock_db = MagicMock()
-            mock_get_db.return_value = iter([mock_db])
+        from app.routers.deps import get_user_service
 
-            with patch("app.routers.auth.UserService") as MockUserService:
-                service_instance = MockUserService.return_value
-                service_instance.get_by_username.return_value = None
-                service_instance.get_by_email.return_value = None
-                service_instance.create.return_value = mock_user
+        service_instance = MagicMock()
+        service_instance.get_by_username.return_value = None
+        service_instance.get_by_email.return_value = None
+        service_instance.create.return_value = mock_user
 
-                response = test_client.post("/api/v1/auth/register", json={
-                    "username": "newuser",
-                    "email": "new@example.com",
-                    "password": "password123",
-                    "confirm_password": "password123"
-                })
+        app = test_client.app
+        app.dependency_overrides[get_user_service] = lambda: service_instance
+        try:
+            response = test_client.post("/api/v1/auth/register", json={
+                "username": "newuser",
+                "email": "new@example.com",
+                "password": "password123",
+                "confirm_password": "password123"
+            })
+        finally:
+            app.dependency_overrides.clear()
 
         assert response.status_code == 201
         data = response.json()
@@ -108,20 +110,22 @@ class TestAuthEndpoints:
 
     def test_register_duplicate_username(self, test_client, mock_user):
         """测试注册 - 用户名已存在"""
-        with patch("app.routers.auth.get_db") as mock_get_db:
-            mock_db = MagicMock()
-            mock_get_db.return_value = iter([mock_db])
+        from app.routers.deps import get_user_service
 
-            with patch("app.routers.auth.UserService") as MockUserService:
-                service_instance = MockUserService.return_value
-                service_instance.get_by_username.return_value = mock_user
+        service_instance = MagicMock()
+        service_instance.get_by_username.return_value = mock_user
 
-                response = test_client.post("/api/v1/auth/register", json={
-                    "username": "testuser",
-                    "email": "new@example.com",
-                    "password": "password123",
-                    "confirm_password": "password123"
-                })
+        app = test_client.app
+        app.dependency_overrides[get_user_service] = lambda: service_instance
+        try:
+            response = test_client.post("/api/v1/auth/register", json={
+                "username": "testuser",
+                "email": "new@example.com",
+                "password": "password123",
+                "confirm_password": "password123"
+            })
+        finally:
+            app.dependency_overrides.clear()
 
         assert response.status_code == 400
 
@@ -138,23 +142,25 @@ class TestAuthEndpoints:
 
     def test_login_success(self, test_client, mock_user):
         """测试登录成功"""
-        with patch("app.routers.auth.get_db") as mock_get_db:
-            mock_db = MagicMock()
-            mock_get_db.return_value = iter([mock_db])
+        from app.routers.deps import get_auth_service
 
-            with patch("app.routers.auth.AuthService") as MockAuthService:
-                service_instance = MockAuthService.return_value
-                service_instance.authenticate.return_value = mock_user
-                service_instance.create_tokens.return_value = (
-                    "access_token_xxx",
-                    "refresh_token_xxx",
-                    1800
-                )
+        service_instance = MagicMock()
+        service_instance.authenticate.return_value = mock_user
+        service_instance.create_tokens.return_value = (
+            "access_token_xxx",
+            "refresh_token_xxx",
+            1800
+        )
 
-                response = test_client.post("/api/v1/auth/login", json={
-                    "username": "testuser",
-                    "password": "password123"
-                })
+        app = test_client.app
+        app.dependency_overrides[get_auth_service] = lambda: service_instance
+        try:
+            response = test_client.post("/api/v1/auth/login", json={
+                "username": "testuser",
+                "password": "password123"
+            })
+        finally:
+            app.dependency_overrides.clear()
 
         assert response.status_code == 200
         data = response.json()
@@ -164,18 +170,20 @@ class TestAuthEndpoints:
 
     def test_login_wrong_password(self, test_client):
         """测试登录 - 密码错误"""
-        with patch("app.routers.auth.get_db") as mock_get_db:
-            mock_db = MagicMock()
-            mock_get_db.return_value = iter([mock_db])
+        from app.routers.deps import get_auth_service
 
-            with patch("app.routers.auth.AuthService") as MockAuthService:
-                service_instance = MockAuthService.return_value
-                service_instance.authenticate.return_value = None
+        service_instance = MagicMock()
+        service_instance.authenticate.return_value = None
 
-                response = test_client.post("/api/v1/auth/login", json={
-                    "username": "testuser",
-                    "password": "wrongpassword"
-                })
+        app = test_client.app
+        app.dependency_overrides[get_auth_service] = lambda: service_instance
+        try:
+            response = test_client.post("/api/v1/auth/login", json={
+                "username": "testuser",
+                "password": "wrongpassword"
+            })
+        finally:
+            app.dependency_overrides.clear()
 
         assert response.status_code == 401
 
